@@ -1,15 +1,18 @@
-# 🕵️ AI-Powered OSINT Report Generator
+# 🦊 NaughtyFoxy - AI-Powered OSINT Intelligence Platform
 
-> **Cyberpunk-themed intelligence analysis platform with real Gemini AI integration**
+> **Sly as a Fox! Advanced OSINT investigation tool with AI analysis, mind mapping, and professional report generation.**
 
-![OSINT Generator](https://img.shields.io/badge/OSINT-Report%20Generator-00ff41?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJMMTMuMDkgOC4yNkwyMCA5TDEzLjA5IDE1Ljc0TDEyIDIyTDEwLjkxIDE1Ljc0TDQgOUwxMC45MSA4LjI2TDEyIDJaIiBmaWxsPSIjMDBmZjQxIi8+Cjwvc3ZnPgo=)
+![NaughtyFoxy](https://img.shields.io/badge/🦊-NaughtyFoxy-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.0.1-green?style=for-the-badge)
 ![React](https://img.shields.io/badge/React-18.x-61dafb?style=for-the-badge&logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?style=for-the-badge&logo=typescript)
 ![Gemini AI](https://img.shields.io/badge/Gemini-AI%20Powered-4285f4?style=for-the-badge&logo=google)
 
 ## 🎯 Overview
 
-A cutting-edge **Open Source Intelligence (OSINT) Report Generator** featuring a dark cyberpunk aesthetic, real-time AI analysis, and professional report generation capabilities. Built with React, TypeScript, and integrated with Google's Gemini Pro AI for advanced intelligence analysis.
+**NaughtyFoxy** is a cutting-edge **Open Source Intelligence (OSINT) Investigation Platform** featuring a beautiful macOS-inspired interface, real-time AI analysis, auto-save functionality, and professional report generation capabilities. Built with React, TypeScript, and integrated with Google's Gemini Pro AI for advanced intelligence analysis.
+
+*Sly as a Fox!* 🦊
 
 ## ✨ Key Features
 
@@ -20,30 +23,33 @@ A cutting-edge **Open Source Intelligence (OSINT) Report Generator** featuring a
 - **Risk Assessment** - AI-generated threat and confidence scoring
 - **Timeline Construction** - Chronological event analysis
 
-### 🎨 **Cyberpunk UI/UX**
-- **Dark Theme** - Full cyberpunk aesthetic with neon accents
-- **Matrix Background** - Animated digital rain effect
-- **Terminal Interface** - Retro-futuristic command-line styling
-- **Glitch Effects** - Dynamic text and visual animations
-- **Neon Colors** - Green, blue, and red accent system
+### 🎨 **Beautiful User Interface**
+- **macOS-Inspired Design** - Clean, professional interface with traffic light controls
+- **Dark Theme** - Eye-friendly dark mode with blue accents
+- **Responsive Layout** - Works perfectly on desktop and mobile
+- **Real-time Feedback** - Live status updates and notifications
+- **Auto-Save Functionality** - Never lose your work again!
 
 ### 🧠 **Interactive Mind Mapping**
-- **D3.js Visualization** - Force-directed graph layouts
-- **Drag & Drop** - Interactive node manipulation
-- **Entity Relationships** - Visual connection mapping
-- **Zoom & Pan** - Smooth navigation controls
+- **Dynamic Visualization** - Interactive D3.js-powered entity relationship maps
+- **Connected Networks** - All entities are visually connected
+- **Export Options** - Save as PNG or SVG formats
+- **Zoom & Pan** - Full navigation controls
+- **Entity Selection** - Click to view detailed entity information
 
 ### 📊 **Professional Reporting**
-- **Multi-format Export** - PDF, HTML, and structured data
-- **Chain of Custody** - Proper evidence documentation
-- **Watermarking** - Security and authenticity features
-- **Custom Templates** - Professional intelligence report formats
+- **Beautiful PDF Export** - Professional, branded report generation
+- **Multiple Formats** - PDF, HTML, and TXT export options
+- **Comprehensive Sections** - Executive summary, findings, timeline, recommendations
+- **Custom Branding** - NaughtyFoxy-branded professional reports
+- **Metadata Tracking** - Word count, page count, confidentiality levels
 
-### 💾 **Data Management**
-- **SQLite Database** - Local data persistence
+### 💾 **Smart Data Management**
+- **Auto-Save Technology** - Saves every change automatically after 1 second
+- **LocalStorage Backup** - Data persists across browser sessions
 - **Case Management** - Organize multiple investigations
-- **File Upload** - Support for images, documents, videos (up to 100MB)
-- **Auto-save** - Prevent data loss during analysis
+- **File Upload Support** - Images, videos, documents, and more (up to 200MB)
+- **Database Storage** - Persistent storage with SQLite
 
 ## 🚀 Quick Start
 
