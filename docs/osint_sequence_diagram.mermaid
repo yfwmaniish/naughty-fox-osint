@@ -1,0 +1,119 @@
+sequenceDiagram
+    participant U as User
+    participant F as Frontend
+    participant API as API Gateway
+    participant Auth as AuthService
+    participant IS as InvestigationService
+    participant ES as EvidenceService
+    participant FS as FileService
+    participant AI as AIService
+    participant RS as ReportService
+    participant DB as Database
+    participant Storage as FileStorage
+
+    %% Authentication Flow
+    U->>F: Login with credentials
+    F->>API: POST /auth/login
+    API->>Auth: validateCredentials(email, password)
+    Auth->>DB: findUserByEmail(email)
+    DB-->>Auth: user data
+    Auth->>Auth: verifyPassword(password, hash)
+    Auth->>Auth: generateJWT(user)
+    Auth-->>API: AuthResult{token, user}
+    API-->>F: 200 OK {token, user}
+    F->>F: storeToken(token)
+    F-->>U: Dashboard loaded
+
+    %% Investigation Creation Flow
+    U->>F: Create new investigation
+    F->>API: POST /investigations
+    API->>Auth: validateToken(token)
+    Auth-->>API: user validated
+    API->>IS: createInvestigation(data, userId)
+    IS->>DB: investigations.create(data)
+    DB-->>IS: investigation created
+    IS-->>API: Investigation object
+    API-->>F: 201 Created {investigation}
+    F-->>U: Investigation created
+
+    %% Evidence Upload and Analysis Flow
+    U->>F: Upload evidence (file + text)
+    F->>API: POST /investigations/{id}/evidence
+    API->>Auth: validateToken(token)
+    Auth-->>API: user validated
+    API->>ES: addEvidence(investigationId, evidenceData)
+    
+    %% File Upload Process
+    ES->>FS: uploadFile(fileData)
+    FS->>FS: scanForViruses(file)
+    FS->>FS: encryptFile(file)
+    FS->>Storage: store(encryptedFile)
+    Storage-->>FS: fileStored confirmation
+    FS->>FS: extractText(file) [if applicable]
+    FS-->>ES: File object created
+    
+    %% Evidence Creation
+    ES->>DB: evidence.create(evidenceData)
+    DB-->>ES: evidence created
+    
+    %% AI Analysis Process
+    ES->>AI: analyzeEvidence(evidence)
+    AI->>AI: extractEntities(text)
+    AI->>AI: mapRelationships(entities)
+    AI->>AI: generateTimeline(evidence)
+    AI->>AI: assessRisk(analysis)
+    AI-->>ES: AIAnalysis object
+    
+    ES->>DB: evidence.updateAnalysis(id, analysis)
+    DB-->>ES: analysis saved
+    ES-->>API: Evidence with analysis
+    API-->>F: 201 Created {evidence}
+    F-->>U: Evidence added and analyzed
+
+    %% Report Generation Flow
+    U->>F: Generate report
+    F->>API: POST /investigations/{id}/reports
+    API->>Auth: validateToken(token)
+    Auth-->>API: user validated
+    API->>RS: generateReport(investigationId)
+    
+    RS->>DB: investigations.findById(id)
+    DB-->>RS: investigation data
+    RS->>DB: evidence.findByInvestigation(id)
+    DB-->>RS: evidence list
+    
+    RS->>RS: generateSections(investigation, evidence)
+    RS->>RS: applyTemplate(sections, template)
+    RS->>DB: reports.create(reportData)
+    DB-->>RS: report created
+    RS-->>API: Report object
+    API-->>F: 201 Created {report}
+    F-->>U: Report generated
+
+    %% Export Flow
+    U->>F: Export report as PDF
+    F->>API: GET /reports/{id}/export?format=pdf
+    API->>Auth: validateToken(token)
+    Auth-->>API: user validated
+    API->>RS: exportReport(reportId, 'pdf')
+    
+    RS->>DB: reports.findById(id)
+    DB-->>RS: report data
+    RS->>RS: renderHTML(report)
+    RS->>RS: generatePDF(html)
+    RS-->>API: PDF buffer
+    API-->>F: 200 OK {pdf file}
+    F-->>U: PDF download started
+
+    %% File Download Flow
+    U->>F: Download evidence file
+    F->>API: GET /files/{id}/download
+    API->>Auth: validateToken(token)
+    Auth-->>API: user validated
+    API->>FS: downloadFile(fileId)
+    FS->>Storage: retrieve(fileId)
+    Storage-->>FS: encrypted file
+    FS->>FS: decryptFile(encryptedFile)
+    FS-->>API: decrypted file buffer
+    API-->>F: 200 OK {file}
+    F-->>U: File download
