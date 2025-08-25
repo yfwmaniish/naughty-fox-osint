@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,55 +6,139 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Brain, 
   FileText, 
-  Upload, 
-  Play, 
   Download,
   AlertCircle,
   CheckCircle,
   Clock,
   Shield,
-  Zap,
   Plus,
-  Globe
+  Globe,
+  FileDown
 } from 'lucide-react';
 import { toast } from 'sonner';
+import jsPDF from 'jspdf';
 
-import FileUpload from '@/components/FileUpload';
-import RichEditor from '@/components/RichEditor';
-import AIAnalysisPanel from '@/components/AIAnalysisPanel';
-import ReportViewer from '@/components/ReportViewer';
-import CaseManager from '@/components/CaseManager';
-import ExportDialog from '@/components/ExportDialog';
+// Import components
 import MatrixBackground from '@/components/MatrixBackground';
+import CaseManager from '@/components/CaseManager';
 import MindMap from '@/components/MindMap';
-import CyberLoader from '@/components/CyberLoader';
-import GeminiApiConfig from '@/components/GeminiApiConfig';
+import FileUpload from '@/components/FileUpload';
 
-import { OSINTCase, UploadedFile, AIAnalysis, OSINTReport, ExportOptions } from '@/types';
+// Import types and utilities
+import { OSINTCase, UploadedFile, AIAnalysis, OSINTReport } from '@/types';
 import { saveCase, getCases } from '@/lib/storage';
-import { simulateGeminiAnalysis, generateMockReport } from '@/lib/mockData';
-import { geminiApi } from '@/lib/geminiApi';
-import { exportToPDF, exportToHTML } from '@/lib/exportService';
-import '../styles/dark-theme.css';
+import { analyzeWithGemini, isGeminiConfigured } from '@/lib/gemini';
+import '../styles/macos-theme.css';
 
 export default function OSINTReportGenerator() {
   const [currentCase, setCurrentCase] = useState<OSINTCase | null>(null);
   const [investigationNotes, setInvestigationNotes] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
   const [report, setReport] = useState<OSINTReport | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
-  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [activeTab, setActiveTab] = useState('case-setup');
-  const [geminiApiKey, setGeminiApiKey] = useState('YOUR_GEMINI_API_KEY');
-  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  
+  // Auto-save timeout ref
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Auto-save function with debouncing
+  const autoSaveCase = useCallback(async () => {
+    if (!currentCase) return;
+    
+    setIsSaving(true);
+    
+    const updatedCase: OSINTCase = {
+      ...currentCase,
+      description: investigationNotes,
+      files,
+      aiAnalysis: aiAnalysis || currentCase.aiAnalysis,
+      report: report || currentCase.report,
+      updatedAt: new Date()
+    };
+    
+    try {
+      saveCase(updatedCase);
+      setCurrentCase(updatedCase);
+      setLastSaved(new Date());
+      
+      // Store in localStorage as backup
+      localStorage.setItem('currentCase', JSON.stringify(updatedCase));
+      localStorage.setItem('investigationNotes', investigationNotes);
+      
+    } catch (error) {
+      console.error('Auto-save failed:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [currentCase, investigationNotes, files, aiAnalysis, report]);
+
+  // Debounced auto-save
+  const debouncedAutoSave = useCallback(() => {
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+    
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      autoSaveCase();
+    }, 1000); // Save after 1 second of inactivity
+  }, [autoSaveCase]);
+
+  useEffect(() => {
+    // Apply macOS theme to body
+    document.body.classList.add('macos-theme');
+    document.documentElement.classList.add('macos-theme');
+    
+    // Load from localStorage on mount
+    const savedCase = localStorage.getItem('currentCase');
+    const savedNotes = localStorage.getItem('investigationNotes');
+    
+    if (savedCase && !currentCase) {
+      try {
+        const parsedCase = JSON.parse(savedCase);
+        // Convert date strings back to Date objects
+        parsedCase.createdAt = new Date(parsedCase.createdAt);
+        parsedCase.updatedAt = new Date(parsedCase.updatedAt);
+        parsedCase.aiAnalysis.processedAt = new Date(parsedCase.aiAnalysis.processedAt);
+        
+        setCurrentCase(parsedCase);
+        setFiles(parsedCase.files || []);
+        setAiAnalysis(parsedCase.aiAnalysis && parsedCase.aiAnalysis.entities.length > 0 ? parsedCase.aiAnalysis : null);
+        setReport(parsedCase.report && parsedCase.report.sections.length > 0 ? parsedCase.report : null);
+      } catch (error) {
+        console.error('Failed to load saved case:', error);
+      }
+    }
+    
+    if (savedNotes && !investigationNotes) {
+      setInvestigationNotes(savedNotes);
+    }
+    
+    return () => {
+      document.body.classList.remove('macos-theme');
+      document.documentElement.classList.remove('macos-theme');
+      
+      // Clear timeout on cleanup
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Auto-save when data changes
+  useEffect(() => {
+    if (currentCase && (investigationNotes || files.length > 0)) {
+      debouncedAutoSave();
+    }
+  }, [investigationNotes, files, currentCase?.name, currentCase?.subject, debouncedAutoSave]);
 
   // Initialize new case
   const createNewCase = () => {
@@ -97,522 +181,922 @@ export default function OSINTReportGenerator() {
     
     setCurrentCase(newCase);
     setInvestigationNotes('');
-    setTags([]);
     setFiles([]);
     setAiAnalysis(null);
     setReport(null);
     setActiveTab('case-setup');
+    toast.success('New case created successfully!');
   };
 
-  // Load existing case
+    // Load existing case
   const loadCase = (caseData: OSINTCase) => {
     setCurrentCase(caseData);
-    setInvestigationNotes(caseData.description);
-    setFiles(caseData.files);
-    setAiAnalysis(caseData.aiAnalysis.entities.length > 0 ? caseData.aiAnalysis : null);
-    setReport(caseData.report.sections.length > 0 ? caseData.report : null);
+    setInvestigationNotes(caseData.description || ''); // Use the description field to populate investigation notes
+    setFiles(caseData.files || []);
+    setAiAnalysis(caseData.aiAnalysis && caseData.aiAnalysis.entities.length > 0 ? caseData.aiAnalysis : null);
+    setReport(caseData.report && caseData.report.sections.length > 0 ? caseData.report : null);
     setActiveTab('case-setup');
+    toast.success(`Loaded case: ${caseData.name}`);
   };
 
-  // Save current case - only manual save to prevent popups
+  // Manual save function (for explicit save button)
   const saveCurrentCase = () => {
     if (!currentCase) return;
     
-    const updatedCase: OSINTCase = {
-      ...currentCase,
-      description: investigationNotes,
-      files,
-      aiAnalysis: aiAnalysis || currentCase.aiAnalysis,
-      report: report || currentCase.report,
-      updatedAt: new Date()
-    };
-    
-    try {
-      saveCase(updatedCase);
-      setCurrentCase(updatedCase);
+    autoSaveCase().then(() => {
       toast.success('Case saved successfully');
-    } catch (error) {
+    }).catch((error) => {
       console.error('Failed to save case:', error);
       toast.error('Failed to save case');
-    }
-  };
-
-  // Update case basic info
-  const updateCaseInfo = (field: string, value: string) => {
-    if (!currentCase) return;
-    
-    setCurrentCase({
-      ...currentCase,
-      [field]: value,
-      updatedAt: new Date()
     });
   };
 
-  // Run AI analysis
-  const runAIAnalysis = async () => {
+  // Update case basic info with auto-save
+  const updateCaseInfo = (field: string, value: string) => {
     if (!currentCase) return;
+    
+    const updatedCase = {
+      ...currentCase,
+      [field]: value,
+      updatedAt: new Date()
+    };
+    
+    setCurrentCase(updatedCase);
+    
+    // Trigger auto-save after a brief delay
+    debouncedAutoSave();
+  };
+
+  // Generate report function
+  const generateReport = async () => {
+    console.log('🦊 Starting Report Generation...');
+    
+    if (!currentCase || !aiAnalysis) {
+      toast.error('Please complete AI analysis before generating a report');
+      return;
+    }
+    
+    setIsGeneratingReport(true);
+    setActiveTab('report');
+    
+    try {
+      toast.info('📄 Generating professional OSINT report...');
+      
+      // Create report sections based on AI analysis
+      const reportSections = [
+        {
+          id: 'executive-summary',
+          title: 'Executive Summary',
+          content: `This OSINT investigation of ${currentCase.subject} has identified ${aiAnalysis.entities.length} entities and ${aiAnalysis.insights.length} key insights. The overall risk assessment score is ${Math.round(aiAnalysis.riskScore * 100)}/100 with a confidence level of ${Math.round(aiAnalysis.confidence * 100)}%.`,
+          order: 1
+        },
+        {
+          id: 'case-overview',
+          title: 'Case Overview',
+          content: `**Case Name:** ${currentCase.name}\n**Subject:** ${currentCase.subject}\n**Description:** ${currentCase.description}\n**Investigation Date:** ${new Date().toLocaleDateString()}\n**Status:** ${currentCase.status}`,
+          order: 2
+        },
+        {
+          id: 'entities-identified',
+          title: 'Entities Identified',
+          content: aiAnalysis.entities.map(entity => 
+            `**${entity.type.toUpperCase()}:** ${entity.value} (Confidence: ${Math.round(entity.confidence * 100)}%, Mentions: ${entity.mentions})`
+          ).join('\n\n'),
+          order: 3
+        },
+        {
+          id: 'key-insights',
+          title: 'Key Insights & Analysis',
+          content: aiAnalysis.insights.map(insight => 
+            `**${insight.title}** (${insight.impact.toUpperCase()} Impact)\n${insight.description}\nConfidence: ${Math.round(insight.confidence * 100)}%`
+          ).join('\n\n'),
+          order: 4
+        },
+        {
+          id: 'timeline',
+          title: 'Timeline of Events',
+          content: aiAnalysis.timeline.length > 0 ? 
+            aiAnalysis.timeline.map(event => 
+              `**${new Date(event.date).toLocaleDateString()}:** ${event.title}\n${event.description}\nSource: ${event.source}`
+            ).join('\n\n') : 'No timeline events identified in this investigation.',
+          order: 5
+        },
+        {
+          id: 'risk-assessment',
+          title: 'Risk Assessment',
+          content: `**Overall Risk Score:** ${Math.round(aiAnalysis.riskScore * 100)}/100\n**Confidence Level:** ${Math.round(aiAnalysis.confidence * 100)}%\n\n**Risk Factors:**\n${aiAnalysis.insights.filter(i => i.impact === 'high' || i.impact === 'critical').map(i => `• ${i.title}`).join('\n')}`,
+          order: 6
+        },
+        {
+          id: 'recommendations',
+          title: 'Recommendations',
+          content: aiAnalysis.insights.flatMap(insight => insight.recommendations || []).length > 0 ?
+            aiAnalysis.insights.flatMap(insight => insight.recommendations || []).map(rec => `• ${rec}`).join('\n') :
+            '• Continue monitoring identified entities\n• Review and validate findings through additional sources\n• Consider escalation based on risk assessment',
+          order: 7
+        }
+      ];
+      
+      const generatedReport: OSINTReport = {
+        id: `report_${Date.now()}`,
+        caseId: currentCase.id,
+        sections: reportSections,
+        metadata: {
+          title: `OSINT Investigation Report - ${currentCase.name}`,
+          investigator: 'NaughtyFoxy AI System',
+          caseNumber: currentCase.id,
+          dateGenerated: new Date(),
+          confidentialityLevel: 'confidential',
+          pageCount: Math.ceil(reportSections.length * 1.5),
+          wordCount: reportSections.reduce((total, section) => total + section.content.split(' ').length, 0)
+        },
+        generatedAt: new Date(),
+        lastModified: new Date(),
+        status: 'completed'
+      };
+      
+      setReport(generatedReport);
+      
+      setCurrentCase({
+        ...currentCase,
+        report: generatedReport,
+        status: 'completed',
+        updatedAt: new Date()
+      });
+      
+      console.log('✅ Report generated successfully');
+      toast.success('🎉 Professional OSINT report generated successfully!');
+      
+    } catch (error) {
+      console.error('❌ Report generation error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast.error(`❌ Report generation failed: ${errorMessage}`);
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
+  // Real AI analysis function using Gemini
+  const runAIAnalysis = async () => {
+    console.log('🦊 Starting AI Analysis...');
+    
+    if (!currentCase) {
+      console.log('❌ No current case');
+      return;
+    }
+    
+    console.log('📝 Investigation notes:', investigationNotes.trim());
+    console.log('📁 Files count:', files.length);
     
     if (!investigationNotes.trim() && files.length === 0) {
       toast.error('Please add investigation notes or upload files before running analysis');
       return;
     }
 
+    console.log('🔑 Checking Gemini configuration...');
+    if (!isGeminiConfigured()) {
+      console.log('❌ Gemini not configured');
+      toast.error('AI analysis is not configured. Please check your Gemini API key.');
+      return;
+    }
+    
+    console.log('✅ Gemini is configured');
     setIsAnalyzing(true);
     setActiveTab('analysis');
     
     try {
-      // Convert UploadedFile[] to File[] for real API analysis
-      const fileObjects = files.map(f => {
-        // Create a File object with the actual content
-        const blob = new Blob([f.url], { type: f.type });
-        return new File([blob], f.name, { type: f.type });
+      toast.info('🧠 Analyzing with AI... This may take a moment.');
+      
+      console.log('🚀 Calling Gemini API...');
+      
+      // Use real Gemini AI analysis
+      const analysisResults = await analyzeWithGemini({
+        investigationNotes: investigationNotes.trim(),
+        caseName: currentCase.name || 'Unnamed Case',
+        subject: currentCase.subject || 'Unknown Subject',
+        description: currentCase.description || 'No description'
       });
       
-      // Use real Gemini API instead of simulation
-      toast.info('Connecting to Gemini AI...', { duration: 2000 });
-      const analysis = await geminiApi.analyzeContent(investigationNotes, fileObjects);
+      console.log('📊 Analysis results:', analysisResults);
       
-      setAiAnalysis(analysis);
+      setAiAnalysis(analysisResults);
       
-      // Update case status
       setCurrentCase({
         ...currentCase,
         status: 'analyzed',
-        aiAnalysis: analysis,
+        aiAnalysis: analysisResults,
         updatedAt: new Date()
       });
       
-      if (analysis.confidence > 0.1) {
-        toast.success(`AI analysis completed successfully (Confidence: ${Math.round(analysis.confidence * 100)}%)`);
-      } else {
-        toast.warning('Analysis completed with low confidence. Please review results carefully.');
-      }
+      const entitiesCount = analysisResults.entities.length;
+      const insightsCount = analysisResults.insights.length;
+      
+      console.log(`✅ Analysis completed: ${entitiesCount} entities, ${insightsCount} insights`);
+      toast.success(`🎉 AI analysis completed! Found ${entitiesCount} entities and ${insightsCount} insights.`);
       
     } catch (error) {
-      console.error('Analysis error:', error);
-      toast.error(`Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      
-      // Fallback to mock analysis if API fails
-      try {
-        toast.info('Falling back to demo analysis...');
-        const fileObjects = files.map(f => {
-          const blob = new Blob([f.url], { type: f.type });
-          return new File([blob], f.name, { type: f.type });
-        });
-        
-        const fallbackAnalysis = await simulateGeminiAnalysis(investigationNotes, fileObjects);
-        setAiAnalysis(fallbackAnalysis);
-        
-        setCurrentCase({
-          ...currentCase,
-          status: 'analyzed',
-          aiAnalysis: fallbackAnalysis,
-          updatedAt: new Date()
-        });
-        
-        toast.warning('Using demo analysis due to API error');
-      } catch (fallbackError) {
-        toast.error('Both real and demo analysis failed. Please try again.');
-      }
+      console.error('❌ Analysis error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast.error(`❌ Analysis failed: ${errorMessage}`);
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  // Generate report
-  const generateReport = async () => {
-    if (!currentCase || !aiAnalysis) {
-      toast.error('Please run AI analysis first');
+  // PDF Export function with beautiful formatting
+  const exportReportAsPDF = async () => {
+    if (!report || !currentCase) {
+      toast.error('Please generate a report first');
       return;
     }
 
-    setIsGeneratingReport(true);
-    setActiveTab('report');
+    setIsExportingPDF(true);
     
     try {
-      // Simulate report generation delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.width;
+      const pageHeight = doc.internal.pageSize.height;
+      let currentY = 20;
+      const margin = 20;
+      const contentWidth = pageWidth - 2 * margin;
       
-      const generatedReport = generateMockReport(currentCase);
-      setReport(generatedReport);
+      // Helper function to add new page if needed
+      const checkPageBreak = (requiredHeight: number) => {
+        if (currentY + requiredHeight > pageHeight - 20) {
+          doc.addPage();
+          currentY = 20;
+        }
+      };
       
-      // Update case status
-      setCurrentCase({
-        ...currentCase,
-        status: 'completed',
-        report: generatedReport,
-        updatedAt: new Date()
+      // Helper function to wrap text
+      const wrapText = (text: string, maxWidth: number, fontSize: number) => {
+        doc.setFontSize(fontSize);
+        const words = text.split(' ');
+        const lines: string[] = [];
+        let currentLine = '';
+        
+        words.forEach(word => {
+          const testLine = currentLine + (currentLine ? ' ' : '') + word;
+          const textWidth = doc.getTextWidth(testLine);
+          
+          if (textWidth > maxWidth && currentLine) {
+            lines.push(currentLine);
+            currentLine = word;
+          } else {
+            currentLine = testLine;
+          }
+        });
+        
+        if (currentLine) {
+          lines.push(currentLine);
+        }
+        
+        return lines;
+      };
+      
+      // Header with logo area
+      doc.setFillColor(59, 130, 246); // Blue background
+      doc.rect(0, 0, pageWidth, 40, 'F');
+      
+      // Fox emoji and title
+      doc.setFontSize(24);
+      doc.setTextColor(255, 255, 255);
+      doc.text('🦊 NaughtyFoxy OSINT Report', margin, 25);
+      
+      currentY = 60;
+      
+      // Report metadata section
+      doc.setFillColor(249, 250, 251); // Light gray background
+      doc.rect(margin, currentY - 10, contentWidth, 50, 'F');
+      
+      doc.setFontSize(16);
+      doc.setTextColor(31, 41, 55); // Dark gray
+      doc.text('Report Information', margin + 5, currentY);
+      
+      currentY += 15;
+      doc.setFontSize(10);
+      doc.setTextColor(75, 85, 99); // Medium gray
+      
+      const metadata = [
+        `Case Name: ${currentCase.name}`,
+        `Subject: ${currentCase.subject}`,
+        `Investigator: ${report.metadata.investigator}`,
+        `Generated: ${report.metadata.dateGenerated.toLocaleDateString()}`,
+        `Case ID: ${report.metadata.caseNumber}`,
+        `Confidentiality: ${report.metadata.confidentialityLevel.toUpperCase()}`
+      ];
+      
+      metadata.forEach(item => {
+        doc.text(item, margin + 5, currentY);
+        currentY += 5;
       });
       
-      toast.success('Report generated successfully');
-    } catch (error) {
-      toast.error('Report generation failed. Please try again.');
-      console.error('Report generation error:', error);
-    } finally {
-      setIsGeneratingReport(false);
-    }
-  };
-
-  // Handle export
-  const handleExport = async (exportOptions: ExportOptions) => {
-    if (!report) return;
-    
-    try {
-      if (exportOptions.format === 'pdf') {
-        await exportToPDF(report, exportOptions);
-      } else if (exportOptions.format === 'html') {
-        exportToHTML(report, exportOptions);
+      currentY += 15;
+      
+      // Report sections
+      report.sections.forEach((section, index) => {
+        checkPageBreak(30);
+        
+        // Section header
+        doc.setFillColor(239, 246, 255); // Light blue background
+        doc.rect(margin, currentY - 5, contentWidth, 15, 'F');
+        
+        doc.setFontSize(14);
+        doc.setTextColor(29, 78, 216); // Blue text
+        doc.text(`${index + 1}. ${section.title}`, margin + 5, currentY + 5);
+        
+        currentY += 20;
+        
+        // Section content
+        doc.setFontSize(10);
+        doc.setTextColor(31, 41, 55); // Dark gray
+        
+        const contentLines = wrapText(section.content, contentWidth - 10, 10);
+        
+        contentLines.forEach(line => {
+          checkPageBreak(6);
+          doc.text(line, margin + 5, currentY);
+          currentY += 5;
+        });
+        
+        currentY += 10;
+      });
+      
+      // Footer on each page
+      const pageCount = (doc as any).internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(107, 114, 128); // Gray
+        doc.text(
+          `Page ${i} of ${pageCount} | Generated by NaughtyFoxy AI | ${new Date().toLocaleDateString()}`,
+          margin,
+          pageHeight - 10
+        );
+        
+        // Confidentiality watermark
+        doc.setFontSize(6);
+        doc.setTextColor(239, 68, 68); // Red
+        doc.text(
+          `CONFIDENTIAL - ${report.metadata.confidentialityLevel.toUpperCase()}`,
+          pageWidth - margin - 40,
+          pageHeight - 10
+        );
       }
-      toast.success(`Report exported as ${exportOptions.format.toUpperCase()}`);
+      
+      // Save the PDF
+      const fileName = `${currentCase.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_osint_report.pdf`;
+      doc.save(fileName);
+      
+      toast.success('🎉 Beautiful PDF report exported successfully!');
+      
     } catch (error) {
-      toast.error('Export failed. Please try again.');
-      console.error('Export error:', error);
+      console.error('PDF export error:', error);
+      toast.error('Failed to export PDF report');
+    } finally {
+      setIsExportingPDF(false);
     }
   };
-
-  // Initialize dark theme on mount - NO AUTO-SAVE
-  useEffect(() => {
-    // Apply dark theme to body
-    document.body.classList.add('dark-theme');
-    document.documentElement.classList.add('dark-theme');
-    
-    return () => {
-      document.body.classList.remove('dark-theme');
-      document.documentElement.classList.remove('dark-theme');
-    };
-  }, []);
 
   return (
-    <div className="min-h-screen dark-theme data-grid bg-primary text-primary">
-      <MatrixBackground />
-      
-      {/* Header */}
-      <div className="terminal-window mb-6">
-        <div className="terminal-header">
-          <div className="terminal-dot red"></div>
-          <div className="terminal-dot yellow"></div>
-          <div className="terminal-dot green"></div>
-          <span className="text-neon-green font-mono text-sm ml-4">OSINT-ANALYZER v2.0.1</span>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950">
+      {/* macOS Window Header - Full Width */}
+      <div className="macos-window mx-0 mt-0 mb-6 rounded-none">
+        <div className="macos-window-header">
+          <div className="macos-traffic-lights">
+            <div className="macos-traffic-light close"></div>
+            <div className="macos-traffic-light minimize"></div>
+            <div className="macos-traffic-light maximize"></div>
+          </div>
+          <span className="text-white font-semibold text-sm ml-4">
+            NaughtyFoxy v2.0.1
+          </span>
+          <div className="ml-auto flex items-center space-x-2">
+            {currentCase && (
+              <div className={`macos-status ${
+                currentCase.status === 'analyzing' ? 'analyzing' :
+                currentCase.status === 'completed' ? '' : 'error'
+              }`}>
+                <div className="macos-status-dot"></div>
+                <span>{currentCase.status.toUpperCase()}</span>
+              </div>
+            )}
+            
+            {/* Auto-save status indicator */}
+            {currentCase && (
+              <div className="flex items-center space-x-2 text-sm text-gray-400">
+                {isSaving ? (
+                  <>
+                    <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+                    <span>Saving...</span>
+                  </>
+                ) : lastSaved ? (
+                  <>
+                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                    <span>Auto-saved {lastSaved.toLocaleTimeString()}</span>
+                  </>
+                ) : null}
+              </div>
+            )}
+            
+            <button 
+              onClick={saveCurrentCase}
+              disabled={!currentCase || isSaving}
+              className="macos-button macos-button-success"
+              title="Manual save (auto-save is enabled)"
+            >
+              <CheckCircle className="h-4 w-4" />
+              {isSaving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
         </div>
         
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between p-4">
-            <motion.div 
-              className="flex items-center space-x-3"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5 }}
-            >
-              <Shield className="h-8 w-8 text-neon-green pulse-glow" />
-              <div>
-                <h1 className="text-xl font-bold text-neon-green glitch-text">OSINT REPORT GENERATOR</h1>
-                <p className="text-sm text-neon-blue typing-text">AI-POWERED INTELLIGENCE ANALYSIS PLATFORM</p>
-              </div>
-            </motion.div>
-            
-            <div className="flex items-center space-x-3">
-              {currentCase && (
-                <Badge variant="outline" className="flex items-center space-x-1 border-neon-green text-neon-green">
-                  <Clock className="h-3 w-3" />
-                  <span className="capitalize">{currentCase.status}</span>
-                </Badge>
-              )}
-              
-              <Button onClick={saveCurrentCase} variant="outline" size="sm" disabled={!currentCase} className="neon-button">
-                <CheckCircle className="h-4 w-4 mr-1" />
-                Save
-              </Button>
+        <div className="p-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10">
+          <div className="flex items-center space-x-4">
+            <div className="relative">
+              <div className="text-6xl">🦊</div>
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold text-white mb-1">
+                NaughtyFoxy
+              </h1>
+              <p className="text-gray-300">
+                AI-Powered OSINT Intelligence Platform - Sly as a Fox! 🦊
+              </p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Sidebar - Case Management */}
           <div className="lg:col-span-1">
-            <CaseManager
-              onCaseSelect={loadCase}
-              onNewCase={createNewCase}
-              selectedCaseId={currentCase?.id}
-            />
+            <div className="macos-card p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-white">Case Database</h2>
+                <button 
+                  onClick={createNewCase}
+                  className="macos-button"
+                >
+                  <Plus className="h-4 w-4" />
+                  New
+                </button>
+              </div>
+              <CaseManager
+                onCaseSelect={loadCase}
+                onNewCase={createNewCase}
+                selectedCaseId={currentCase?.id}
+              />
+            </div>
           </div>
 
           {/* Main Content */}
           <div className="lg:col-span-3">
             {!currentCase ? (
-              <Card className="cyber-card">
-                <CardContent className="flex flex-col items-center justify-center py-16">
-                  <Brain className="h-16 w-16 text-neon-green mb-4 pulse-glow" />
-                  <h2 className="text-2xl font-semibold text-neon-green mb-2 glitch-text">
-                    Welcome to OSINT Report Generator
+              <div className="macos-card animate-fade-in">
+                <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
+                  <Brain className="h-20 w-20 text-blue-500 mb-6" />
+                  <h2 className="text-2xl font-semibold text-white mb-4">
+                    Welcome to NaughtyFoxy 🦊
                   </h2>
-                  <p className="text-neon-blue text-center mb-6 typing-text">
-                    Create a new case or select an existing one to start your OSINT investigation
+                  <p className="text-gray-400 mb-8 max-w-md">
+                    Ready to be sly like a fox? Create a new case or select an existing one to start your OSINT investigation with AI-powered analysis.
                   </p>
-                  <Button onClick={createNewCase} size="lg" className="neon-button">
-                    <Plus className="h-5 w-5 mr-2" />
+                  <button 
+                    onClick={createNewCase} 
+                    className="macos-button text-lg px-8 py-3"
+                  >
+                    <Plus className="h-5 w-5" />
                     Create New Case
-                  </Button>
-                </CardContent>
-              </Card>
+                  </button>
+                </div>
+              </div>
             ) : (
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-6 bg-black/80 border border-neon-green/50">
-                  <TabsTrigger value="case-setup" className="text-neon-green data-[state=active]:bg-neon-green/20 data-[state=active]:text-black">Case Setup</TabsTrigger>
-                  <TabsTrigger value="analysis" className="text-neon-green data-[state=active]:bg-neon-green/20 data-[state=active]:text-black">AI Analysis</TabsTrigger>
-                  <TabsTrigger value="mindmap" className="text-neon-green data-[state=active]:bg-neon-green/20 data-[state=active]:text-black">Mind Map</TabsTrigger>
-                  <TabsTrigger value="report" className="text-neon-green data-[state=active]:bg-neon-green/20 data-[state=active]:text-black">Report</TabsTrigger>
-                  <TabsTrigger value="export" className="text-neon-green data-[state=active]:bg-neon-green/20 data-[state=active]:text-black">Export</TabsTrigger>
-                  <TabsTrigger value="config" className="text-neon-blue data-[state=active]:bg-neon-blue/20 data-[state=active]:text-black">Config</TabsTrigger>
-                </TabsList>
+              <div className="space-y-6 animate-fade-in">
+                {/* Tabs */}
+                <div className="macos-tabs">
+                  <button 
+                    className={`macos-tab ${activeTab === 'case-setup' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('case-setup')}
+                  >
+                    Case Setup
+                  </button>
+                  <button 
+                    className={`macos-tab ${activeTab === 'analysis' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('analysis')}
+                  >
+                    AI Analysis
+                  </button>
+                  <button 
+                    className={`macos-tab ${activeTab === 'report' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('report')}
+                  >
+                    Report
+                  </button>
+                  <button 
+                    className={`macos-tab ${activeTab === 'export' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('export')}
+                  >
+                    Export
+                  </button>
+                </div>
 
-                <TabsContent value="case-setup" className="space-y-6">
-                  {/* Case Information */}
-                  <Card className="cyber-card">
-                    <CardHeader>
-                      <CardTitle className="text-neon-green">Case Information</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <Label htmlFor="caseName" className="text-neon-green">Case Name *</Label>
-                          <Input
-                            id="caseName"
-                            placeholder="Enter case name"
-                            value={currentCase.name}
-                            onChange={(e) => updateCaseInfo('name', e.target.value)}
-                            className="cyber-input"
-                          />
+                {/* Case Setup Tab */}
+                {activeTab === 'case-setup' && (
+                  <div className="space-y-6">
+                    <div className="macos-card p-6">
+                      <h3 className="text-lg font-semibold text-white mb-4">Case Information</h3>
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                              Case Name *
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Enter case name"
+                              value={currentCase.name}
+                              onChange={(e) => updateCaseInfo('name', e.target.value)}
+                              className="macos-input w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                              Subject *
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Person or entity being investigated"
+                              value={currentCase.subject}
+                              onChange={(e) => updateCaseInfo('subject', e.target.value)}
+                              className="macos-input w-full"
+                            />
+                          </div>
                         </div>
+                        
+                        
                         <div>
-                          <Label htmlFor="subject" className="text-neon-green">Subject *</Label>
-                          <Input
-                            id="subject"
-                            placeholder="Person or entity being investigated"
-                            value={currentCase.subject}
-                            onChange={(e) => updateCaseInfo('subject', e.target.value)}
-                            className="cyber-input"
+                          <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Investigation Notes
+                          </label>
+                          <textarea
+                            placeholder="Add your investigation notes and description of the investigation objectives here..."
+                            value={investigationNotes}
+                            onChange={(e) => setInvestigationNotes(e.target.value)}
+                            className="macos-input w-full h-48 resize-none"
                           />
                         </div>
                       </div>
-                      
-                      <div>
-                        <Label htmlFor="description" className="text-neon-green">Case Description</Label>
-                        <Textarea
-                          id="description"
-                          placeholder="Brief description of the investigation objectives"
-                          value={currentCase.description}
-                          onChange={(e) => updateCaseInfo('description', e.target.value)}
-                          className="cyber-input"
-                        />
-                      </div>
-                    </CardContent>
-                  </Card>
+                    </div>
 
-                  {/* Investigation Notes */}
-                  <RichEditor
-                    content={investigationNotes}
-                    onContentChange={setInvestigationNotes}
-                    tags={tags}
-                    onTagsChange={setTags}
-                  />
+                    {/* File Upload Section */}
+                    <div className="macos-card p-6">
+                      <h3 className="text-lg font-semibold text-white mb-4">Evidence Files</h3>
+                      <p className="text-gray-400 mb-4">
+                        Upload images, videos, documents, and other evidence files for analysis
+                      </p>
+                      <FileUpload 
+                        files={files}
+                        onFilesChange={setFiles}
+                        maxFiles={20}
+                        maxSizeBytes={200 * 1024 * 1024} // 200MB
+                        acceptedTypes={[
+                          'image/*', 
+                          'video/*', 
+                          'audio/*',
+                          '.pdf', 
+                          '.doc', 
+                          '.docx', 
+                          '.txt',
+                          '.csv',
+                          '.json'
+                        ]}
+                      />
+                    </div>
 
-                  {/* File Upload */}
-                  <FileUpload
-                    files={files}
-                    onFilesChange={setFiles}
-                    maxFiles={20}
-                    maxSize={100 * 1024 * 1024}
-                  />
-
-                  {/* Analysis Action */}
-                  <Card className="cyber-card">
-                    <CardContent className="pt-6">
+                    <div className="macos-card p-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <h3 className="font-semibold text-neon-green">Ready for AI Analysis</h3>
-                          <p className="text-sm text-gray-400">
-                            Run AI analysis to extract entities, relationships, and insights
+                          <h3 className="text-lg font-semibold text-white mb-2">AI Analysis</h3>
+                          <p className="text-gray-400">
+                            Run AI analysis to extract entities, relationships, and insights from notes and files
                           </p>
                         </div>
-                        <Button 
-                          onClick={runAIAnalysis} 
+                        <button 
+                          onClick={runAIAnalysis}
                           disabled={isAnalyzing || (!investigationNotes.trim() && files.length === 0)}
-                          className="neon-button"
+                          className="macos-button macos-button-success"
                         >
                           {isAnalyzing ? (
-                            <div className="flex items-center">
-                              <div className="cyber-spinner w-4 h-4 mr-2" />
+                            <>
+                              <div className="macos-spinner" />
                               Analyzing...
-                            </div>
+                            </>
                           ) : (
                             <>
-                              <Brain className="h-4 w-4 mr-2" />
-                              Run AI Analysis
+                              <Brain className="h-4 w-4" />
+                              Run Analysis
                             </>
                           )}
-                        </Button>
+                        </button>
                       </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
+                    </div>
+                  </div>
+                )}
 
-                <TabsContent value="analysis" className="space-y-6">
-                  {isAnalyzing ? (
-                    <Card className="cyber-card">
-                      <CardContent className="py-16">
-                        <CyberLoader text="Running AI Analysis" progress={analysisProgress} showProgress />
-                      </CardContent>
-                    </Card>
-                  ) : (
-                    <AIAnalysisPanel analysis={aiAnalysis} isAnalyzing={isAnalyzing} />
-                  )}
-                  
-                  {aiAnalysis && !isAnalyzing && (
-                    <Card className="cyber-card">
-                      <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h3 className="font-semibold text-neon-green">Generate Professional Report</h3>
-                            <p className="text-sm text-gray-400">
-                              Create a comprehensive OSINT report based on AI analysis
-                            </p>
-                          </div>
-                          <Button onClick={generateReport} disabled={isGeneratingReport} className="neon-button">
-                            {isGeneratingReport ? (
-                              <div className="flex items-center">
-                                <div className="cyber-spinner w-4 h-4 mr-2" />
-                                Generating...
+                {/* Analysis Tab */}
+                {activeTab === 'analysis' && (
+                  <div className="space-y-6">
+                    {isAnalyzing ? (
+                      <div className="macos-card p-16 text-center">
+                        <div className="macos-spinner w-16 h-16 mx-auto mb-4" />
+                        <h3 className="text-xl font-semibold text-white mb-2">Running AI Analysis</h3>
+                        <p className="text-gray-400">Processing investigation data...</p>
+                      </div>
+                    ) : aiAnalysis ? (
+                      <div className="space-y-6">
+                        <div className="macos-card p-6">
+                          <h3 className="text-lg font-semibold text-white mb-4">Detected Entities</h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {aiAnalysis.entities.map((entity) => (
+                              <div key={entity.id} className="p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-blue-400 text-sm font-semibold uppercase">{entity.type}</span>
+                                  <span className="text-gray-400 text-xs">{entity.mentions} mentions</span>
+                                </div>
+                                <p className="text-white font-medium text-lg">{entity.value}</p>
                               </div>
+                            ))}
+                          </div>
+                        </div>
+                        
+                        <div className="macos-card p-6">
+                          <h3 className="text-lg font-semibold text-white mb-4">AI Insights</h3>
+                          <div className="space-y-4">
+                            {aiAnalysis.insights.map((insight) => (
+                              <div key={insight.id} className="p-4 bg-gray-700/50 rounded-lg border border-gray-600">
+                                <div className="flex items-center justify-between mb-2">
+                                  <h4 className="text-blue-400 font-semibold">{insight.title}</h4>
+                                  <span className={`px-2 py-1 text-xs font-semibold rounded ${
+                                    insight.impact === 'critical' ? 'bg-red-900 text-red-200' :
+                                    insight.impact === 'high' ? 'bg-orange-900 text-orange-200' :
+                                    insight.impact === 'medium' ? 'bg-yellow-900 text-yellow-200' :
+                                    'bg-green-900 text-green-200'
+                                  }`}>
+                                    {insight.impact.toUpperCase()}
+                                  </span>
+                                </div>
+                                <p className="text-gray-300 mb-2">{insight.description}</p>
+                                <div className="text-xs text-gray-400">
+                                  Confidence: {Math.round(insight.confidence * 100)}%
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        
+                        {/* Mind Map Visualization */}
+                        <MindMap 
+                          entities={aiAnalysis.entities} 
+                          relationships={aiAnalysis.relationships}
+                          onNodeClick={(entity) => {
+                            console.log('Selected entity:', entity);
+                            // Could open detailed view or highlight related insights
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="macos-card p-16 text-center">
+                        <AlertCircle className="h-16 w-16 text-yellow-500 mx-auto mb-4" />
+                        <h3 className="text-xl font-semibold text-white mb-2">No Analysis Data</h3>
+                        <p className="text-gray-400 mb-4">
+                          Run AI analysis from the Case Setup tab to see results here
+                        </p>
+                        <button 
+                          onClick={() => setActiveTab('case-setup')} 
+                          className="macos-button"
+                        >
+                          Go to Case Setup
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Report Tab */}
+                {activeTab === 'report' && (
+                  <div className="space-y-6">
+                    {isGeneratingReport ? (
+                      <div className="macos-card p-16 text-center">
+                        <div className="macos-spinner w-16 h-16 mx-auto mb-4" />
+                        <h3 className="text-xl font-semibold text-white mb-2">Generating Report</h3>
+                        <p className="text-gray-400">Creating professional OSINT report...</p>
+                      </div>
+                    ) : report ? (
+                      <div className="space-y-6">
+                        <div className="macos-card p-6">
+                          <div className="flex items-center justify-between mb-6">
+                            <h3 className="text-lg font-semibold text-white">Generated Report</h3>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-sm text-gray-400">Generated: {report.generatedAt.toLocaleDateString()}</span>
+                              <button 
+                                onClick={generateReport}
+                                className="macos-button macos-button-success"
+                              >
+                                <FileText className="h-4 w-4" />
+                                Regenerate
+                              </button>
+                            </div>
+                          </div>
+                          
+                          <div className="bg-gray-800/50 rounded-lg p-6 border border-gray-600">
+                            <div className="mb-6 pb-4 border-b border-gray-600">
+                              <h2 className="text-2xl font-bold text-white mb-2">{report.metadata.title}</h2>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-400">
+                                <div><strong>Investigator:</strong> {report.metadata.investigator}</div>
+                                <div><strong>Case ID:</strong> {report.metadata.caseNumber}</div>
+                                <div><strong>Pages:</strong> {report.metadata.pageCount}</div>
+                                <div><strong>Word Count:</strong> {report.metadata.wordCount}</div>
+                              </div>
+                            </div>
+                            
+                            <div className="space-y-6">
+                              {report.sections.map((section) => (
+                                <div key={section.id} className="space-y-3">
+                                  <h4 className="text-lg font-semibold text-blue-400">{section.title}</h4>
+                                  <div className="text-gray-300 whitespace-pre-line leading-relaxed">
+                                    {section.content}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="macos-card p-16 text-center">
+                        <FileText className="h-16 w-16 text-blue-500 mx-auto mb-4" />
+                        <h3 className="text-xl font-semibold text-white mb-2">Report Generation</h3>
+                        <p className="text-gray-400 mb-6">
+                          Complete AI analysis to generate professional OSINT reports
+                        </p>
+                        {aiAnalysis ? (
+                          <button 
+                            onClick={generateReport}
+                            disabled={isGeneratingReport}
+                            className="macos-button macos-button-success"
+                          >
+                            {isGeneratingReport ? (
+                              <>
+                                <div className="macos-spinner" />
+                                Generating...
+                              </>
                             ) : (
                               <>
-                                <FileText className="h-4 w-4 mr-2" />
+                                <FileText className="h-4 w-4" />
                                 Generate Report
                               </>
                             )}
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-                </TabsContent>
+                          </button>
+                        ) : (
+                          <div>
+                            <p className="text-gray-500 mb-4">Please complete AI analysis first</p>
+                            <button 
+                              onClick={() => setActiveTab('case-setup')} 
+                              className="macos-button"
+                            >
+                              Go to Case Setup
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
-                <TabsContent value="mindmap" className="space-y-6">
-                  <MindMap
-                    entities={aiAnalysis?.entities || []}
-                    relationships={aiAnalysis?.relationships || []}
-                    onNodeClick={(entity) => {
-                      toast.info(`Selected entity: ${entity.value} (${entity.type})`);
-                    }}
-                  />
-                </TabsContent>
-
-                <TabsContent value="report" className="space-y-6">
-                  <ReportViewer
-                    report={report}
-                    onReportUpdate={setReport}
-                    onExport={(rep, format) => handleExport({ format, includeEvidence: true, includeTimeline: true, watermark: true, confidentialityLevel: rep.metadata.confidentialityLevel })}
-                  />
-                </TabsContent>
-
-                <TabsContent value="export" className="space-y-6">
-                  {report ? (
-                    <Card className="cyber-card">
-                      <CardHeader>
-                        <CardTitle className="flex items-center space-x-2 text-neon-green">
-                          <Download className="h-5 w-5" />
-                          <span>Export Options</span>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <Button 
-                            onClick={() => setShowExportDialog(true)}
-                            className="h-24 flex-col space-y-2 neon-button"
-                          >
-                            <FileText className="h-8 w-8" />
-                            <span>Advanced Export</span>
-                          </Button>
-                          
-                          <Button 
-                            variant="outline"
-                            onClick={() => handleExport({ format: 'pdf', includeEvidence: true, includeTimeline: true, watermark: true, confidentialityLevel: report.metadata.confidentialityLevel })}
-                            className="h-24 flex-col space-y-2 neon-button info"
-                          >
-                            <FileText className="h-8 w-8" />
-                            <span>Quick PDF Export</span>
-                          </Button>
-                          
-                          <Button 
-                            variant="outline"
-                            onClick={() => handleExport({ format: 'html', includeEvidence: true, includeTimeline: true, watermark: true, confidentialityLevel: report.metadata.confidentialityLevel })}
-                            className="h-24 flex-col space-y-2 neon-button info"
-                          >
-                            <Globe className="h-8 w-8" />
-                            <span>HTML Export</span>
-                          </Button>
-                        </div>
-
-                        <Alert className="border-neon-green">
-                          <AlertCircle className="h-4 w-4" />
-                          <AlertDescription className="text-gray-300">
-                            All exports include encryption and watermarking for security. 
-                            Reports are generated with proper chain of custody documentation.
-                          </AlertDescription>
-                        </Alert>
-                      </CardContent>
-                    </Card>
-                  ) : (
-                    <Card className="cyber-card">
-                      <CardContent className="text-center py-16">
-                        <FileText className="h-16 w-16 text-neon-green mx-auto mb-4" />
-                        <h3 className="text-lg font-semibold text-neon-green mb-2">No Report Available</h3>
-                        <p className="text-gray-400 mb-4">
-                          Generate a report first to access export options
-                        </p>
-                        <Button onClick={() => setActiveTab('analysis')} className="neon-button">
-                          Go to Analysis
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="config" className="space-y-6">
-                  <GeminiApiConfig
-                    onApiKeyUpdate={(apiKey) => {
-                      setGeminiApiKey(apiKey);
-                      geminiApi.setConfig({
-                        apiKey,
-                        model: 'gemini-pro',
-                        safetySettings: {
-                          harassment: true,
-                          hateSpeech: true,
-                          sexuallyExplicit: true,
-                          dangerousContent: true
-                        }
-                      });
-                      toast.success('Gemini API configured successfully');
-                    }}
-                    currentApiKey={geminiApiKey}
-                  />
-                </TabsContent>
-              </Tabs>
+                {/* Export Tab */}
+                {activeTab === 'export' && (
+                  <div className="macos-card p-16 text-center">
+                    <Download className="h-16 w-16 text-green-500 mx-auto mb-4" />
+                    <h3 className="text-xl font-semibold text-white mb-2">Export Options</h3>
+                    <p className="text-gray-400 mb-6">
+                      Generate and export professional reports in multiple formats
+                    </p>
+                    {report ? (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto">
+                        <button 
+                          onClick={exportReportAsPDF}
+                          disabled={isExportingPDF}
+                          className="macos-button macos-button-success text-center p-6 flex-col space-y-2"
+                        >
+                          {isExportingPDF ? (
+                            <>
+                              <div className="macos-spinner mx-auto" />
+                              <span>Exporting...</span>
+                            </>
+                          ) : (
+                            <>
+                              <FileDown className="h-8 w-8 mx-auto" />
+                              <div>
+                                <div className="font-semibold">PDF Export</div>
+                                <div className="text-xs text-gray-400">Professional format</div>
+                              </div>
+                            </>
+                          )}
+                        </button>
+                        
+                        <button 
+                          onClick={() => {
+                            // Create downloadable HTML file
+                            const htmlReport = `
+                              <!DOCTYPE html>
+                              <html>
+                              <head>
+                                <title>${report.metadata.title}</title>
+                                <style>
+                                  body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f9fafb; }
+                                  .header { background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+                                  h1 { color: white; margin: 0; }
+                                  h2 { color: #1d4ed8; margin-top: 30px; border-bottom: 2px solid #e5e7eb; padding-bottom: 5px; }
+                                  .metadata { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+                                  .content { white-space: pre-line; line-height: 1.6; background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+                                  .fox-emoji { font-size: 2em; margin-right: 10px; }
+                                </style>
+                              </head>
+                              <body>
+                                <div class="header">
+                                  <h1><span class="fox-emoji">🦊</span>${report.metadata.title}</h1>
+                                </div>
+                                <div class="metadata">
+                                  <strong>Investigator:</strong> ${report.metadata.investigator}<br>
+                                  <strong>Case ID:</strong> ${report.metadata.caseNumber}<br>
+                                  <strong>Generated:</strong> ${report.metadata.dateGenerated.toLocaleDateString()}<br>
+                                  <strong>Pages:</strong> ${report.metadata.pageCount} | <strong>Words:</strong> ${report.metadata.wordCount}
+                                </div>
+                                ${report.sections.map(section => 
+                                  `<h2>${section.title}</h2><div class="content">${section.content}</div>`
+                                ).join('')}
+                              </body>
+                              </html>
+                            `;
+                            const blob = new Blob([htmlReport], { type: 'text/html' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${currentCase?.name || 'OSINT-Report'}.html`;
+                            a.click();
+                            toast.success('Report exported as HTML file!');
+                          }}
+                          className="macos-button text-center p-6 flex-col space-y-2"
+                        >
+                          <Globe className="h-8 w-8 mx-auto" />
+                          <div>
+                            <div className="font-semibold">HTML Export</div>
+                            <div className="text-xs text-gray-400">Web format</div>
+                          </div>
+                        </button>
+                        
+                        <button 
+                          onClick={() => {
+                            // Create downloadable text file
+                            const reportText = `${report.metadata.title}\n\n` +
+                              report.sections.map(section => `${section.title}\n${section.content}\n\n`).join('');
+                            const blob = new Blob([reportText], { type: 'text/plain' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${currentCase?.name || 'OSINT-Report'}.txt`;
+                            a.click();
+                            toast.success('Report exported as text file!');
+                          }}
+                          className="macos-button text-center p-6 flex-col space-y-2"
+                        >
+                          <FileText className="h-8 w-8 mx-auto" />
+                          <div>
+                            <div className="font-semibold">TXT Export</div>
+                            <div className="text-xs text-gray-400">Plain text</div>
+                          </div>
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-gray-500 mb-4">Please generate a report first</p>
+                        <button 
+                          onClick={() => setActiveTab('report')} 
+                          className="macos-button"
+                        >
+                          Go to Report
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
       </div>
-
-      {/* Export Dialog */}
-      {report && (
-        <ExportDialog
-          isOpen={showExportDialog}
-          onClose={() => setShowExportDialog(false)}
-          report={report}
-          onExport={handleExport}
-        />
-      )}
     </div>
   );
 }

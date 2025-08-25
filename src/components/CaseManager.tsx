@@ -59,133 +59,128 @@ export default function CaseManager({ onCaseSelect, onNewCase, selectedCaseId }:
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'draft': return 'bg-gray-100 text-gray-800';
-      case 'analyzing': return 'bg-blue-100 text-blue-800';
-      case 'completed': return 'bg-green-100 text-green-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'draft': return 'border-neon-yellow text-neon-yellow bg-yellow-900/20';
+      case 'analyzing': return 'border-neon-blue text-neon-blue bg-blue-900/20 animate-pulse';
+      case 'completed': return 'border-neon-green text-neon-green bg-green-900/20';
+      default: return 'border-gray-500 text-gray-400 bg-gray-900/20';
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'draft': return '◐';
+      case 'analyzing': return '◑';
+      case 'completed': return '●';
+      default: return '○';
     }
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>Case Management</CardTitle>
-          <Button onClick={onNewCase} size="sm">
-            <Plus className="h-4 w-4 mr-1" />
-            New Case
-          </Button>
+    <div className="space-y-4">
+      {/* Search and Filter */}
+      <div className="flex items-center space-x-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search cases..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="macos-input pl-10 w-full text-sm"
+            style={{ color: '#ffffff !important' }}
+          />
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Search and Filter */}
-        <div className="flex items-center space-x-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Search cases..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Filter className="h-4 w-4 mr-1" />
-                Filter
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => setFilterStatus('all')}>
-                All Status
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setFilterStatus('draft')}>
-                Draft
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setFilterStatus('analyzing')}>
-                Analyzing
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setFilterStatus('completed')}>
-                Completed
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        <select 
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value)}
+          className="macos-input text-sm"
+          style={{ color: '#ffffff !important' }}
+        >
+          <option value="all" style={{color: '#ffffff', backgroundColor: '#2c2c2e'}}>All Status</option>
+          <option value="draft" style={{color: '#ffffff', backgroundColor: '#2c2c2e'}}>Draft</option>
+          <option value="analyzing" style={{color: '#ffffff', backgroundColor: '#2c2c2e'}}>Analyzing</option>
+          <option value="completed" style={{color: '#ffffff', backgroundColor: '#2c2c2e'}}>Completed</option>
+        </select>
+      </div>
 
-        {/* Case List */}
-        <div className="space-y-2 max-h-96 overflow-y-auto">
-          {filteredCases.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              {cases.length === 0 ? (
-                <div>
-                  <FolderOpen className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                  <div>No cases found. Create your first case to get started.</div>
-                </div>
-              ) : (
-                <div>No cases match your search criteria.</div>
-              )}
-            </div>
-          ) : (
-            filteredCases.map((caseData) => (
-              <div
-                key={caseData.id}
-                className={`p-3 border rounded-lg cursor-pointer transition-colors hover:bg-gray-50 ${
-                  selectedCaseId === caseData.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                }`}
-                onClick={() => onCaseSelect(caseData)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center space-x-2 mb-1">
-                      <h3 className="font-medium text-sm truncate">{caseData.name}</h3>
-                      <Badge className={getStatusColor(caseData.status)}>
-                        {caseData.status}
-                      </Badge>
-                    </div>
-                    
-                    <div className="text-sm text-gray-600 mb-2">
-                      Subject: {caseData.subject}
-                    </div>
-                    
-                    <div className="flex items-center space-x-4 text-xs text-gray-500">
-                      <div className="flex items-center space-x-1">
-                        <Calendar className="h-3 w-3" />
-                        <span>{caseData.createdAt.toLocaleDateString()}</span>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <User className="h-3 w-3" />
-                        <span>{caseData.files.length} files</span>
+      {/* Case List */}
+      <div className="space-y-3 max-h-96 overflow-y-auto">
+        {filteredCases.length === 0 ? (
+          <div className="text-center py-8">
+            {cases.length === 0 ? (
+              <div className="animate-fade-in">
+                <FolderOpen className="h-12 w-12 mx-auto mb-3 text-blue-500" />
+                <div className="text-white font-semibold mb-1">Database Empty</div>
+                <div className="text-gray-400 text-sm">Create your first case to begin</div>
+              </div>
+            ) : (
+              <div className="text-white font-semibold">No matches found</div>
+            )}
+          </div>
+        ) : (
+          filteredCases.map((caseData, index) => (
+            <div
+              key={caseData.id}
+              className={`macos-card p-4 cursor-pointer transition-all duration-200 ${
+                selectedCaseId === caseData.id 
+                  ? 'ring-2 ring-blue-500 bg-blue-500/10' 
+                  : 'hover:bg-gray-700/50'
+              }`}
+              onClick={() => onCaseSelect(caseData)}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-3 mb-2">
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-white text-sm truncate mb-1">
+                        {caseData.name || 'Unnamed Case'}
+                      </h3>
+                      <div className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-full ${
+                        caseData.status === 'draft' ? 'bg-yellow-500/20 text-yellow-400' :
+                        caseData.status === 'analyzing' ? 'bg-blue-500/20 text-blue-400' :
+                        caseData.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                        'bg-gray-500/20 text-gray-400'
+                      }`}>
+                        {getStatusIcon(caseData.status)} {caseData.status.charAt(0).toUpperCase() + caseData.status.slice(1)}
                       </div>
                     </div>
                   </div>
                   
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => onCaseSelect(caseData)}>
-                        <Edit className="h-4 w-4 mr-2" />
-                        Open Case
-                      </DropdownMenuItem>
-                      <DropdownMenuItem 
-                        onClick={() => handleDeleteCase(caseData.id)}
-                        className="text-red-600"
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Delete Case
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <div className="text-xs text-gray-400 mb-3">
+                    <span className="text-gray-500">Subject:</span> <span className="text-white">{caseData.subject || 'Unknown'}</span>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center space-x-1 text-gray-400">
+                      <Calendar className="h-3 w-3" />
+                      <span className="text-white">{caseData.createdAt.toLocaleDateString()}</span>
+                    </div>
+                    <div className="flex items-center space-x-1 text-gray-400">
+                      <User className="h-3 w-3" />
+                      <span className="text-white">{caseData.files.length} files</span>
+                    </div>
+                  </div>
                 </div>
+                
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteCase(caseData.id);
+                  }}
+                  className="text-gray-400 hover:text-red-400 transition-colors p-1"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
-            ))
-          )}
-        </div>
-      </CardContent>
-    </Card>
+              
+              {/* Case ID display */}
+              <div className="absolute top-2 right-2 text-xs text-gray-500 opacity-50">
+                #{caseData.id.slice(-6).toUpperCase()}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }

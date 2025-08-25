@@ -4,8 +4,9 @@ import * as d3 from 'd3';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Download, Maximize2, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
+import { Download, Maximize2, RotateCcw, ZoomIn, ZoomOut, Image } from 'lucide-react';
 import { Entity, Relationship } from '@/types';
+import html2canvas from 'html2canvas';
 
 interface MindMapProps {
   entities: Entity[];
@@ -37,16 +38,18 @@ export default function MindMap({ entities, relationships, onNodeClick }: MindMa
 
   const getNodeColor = (type: string) => {
     const colors: Record<string, string> = {
-      person: '#00ff41',
-      email: '#00d4ff',
-      phone: '#ff0040',
-      location: '#a855f7',
-      username: '#ffff00',
-      organization: '#ff8c00',
-      url: '#ff69b4',
-      ip: '#32cd32'
+      person: '#10b981',
+      email: '#06b6d4', 
+      phone: '#ef4444',
+      location: '#8b5cf6',
+      username: '#84cc16',
+      organization: '#f97316',
+      website: '#f59e0b',
+      ip_address: '#6366f1',
+      url: '#f59e0b',
+      ip: '#6366f1'
     };
-    return colors[type] || '#ffffff';
+    return colors[type] || '#9ca3af';
   };
 
   const getNodeSize = (mentions: number, confidence: number) => {
@@ -69,12 +72,29 @@ export default function MindMap({ entities, relationships, onNodeClick }: MindMa
       group: index % 8
     }));
 
-    const links: Link[] = relationships.map(rel => ({
+    // Create relationships from existing data
+    let links: Link[] = relationships.map(rel => ({
       source: rel.source,
       target: rel.target,
       type: rel.type,
       confidence: rel.confidence
     }));
+
+    // If no relationships exist or entities are disconnected, create a connected network
+    if (links.length === 0 || nodes.length > links.length + 1) {
+      // Create a hub-and-spoke pattern with the first entity as the center
+      const hubNode = nodes[0];
+      if (hubNode) {
+        for (let i = 1; i < nodes.length; i++) {
+          links.push({
+            source: hubNode.id,
+            target: nodes[i].id,
+            type: 'connected',
+            confidence: 0.7
+          });
+        }
+      }
+    }
 
     // Create simulation
     const simulation = d3.forceSimulation<Node>(nodes)
@@ -101,7 +121,7 @@ export default function MindMap({ entities, relationships, onNodeClick }: MindMa
       .data(links)
       .enter()
       .append('line')
-      .attr('stroke', '#333')
+      .attr('stroke', '#6b7280')
       .attr('stroke-width', (d: Link) => Math.sqrt(d.confidence * 5))
       .attr('stroke-opacity', 0.6);
 
@@ -113,7 +133,7 @@ export default function MindMap({ entities, relationships, onNodeClick }: MindMa
       .append('text')
       .attr('text-anchor', 'middle')
       .attr('font-size', '10px')
-      .attr('fill', '#666')
+      .attr('fill', '#9ca3af')
       .text((d: Link) => d.type);
 
     // Create nodes
@@ -211,7 +231,7 @@ export default function MindMap({ entities, relationships, onNodeClick }: MindMa
     };
   }, [entities, relationships, dimensions]);
 
-  const exportMindMap = () => {
+  const exportMindMapAsSVG = () => {
     if (!svgRef.current) return;
     
     const svg = svgRef.current;
@@ -223,11 +243,39 @@ export default function MindMap({ entities, relationships, onNodeClick }: MindMa
     
     const a = document.createElement('a');
     a.href = url;
-    a.download = '/images/mindmap.jpg';
+    a.download = 'mindmap.svg';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const exportMindMapAsImage = async () => {
+    if (!containerRef.current) return;
+    
+    try {
+      const canvas = await html2canvas(containerRef.current, {
+        backgroundColor: '#1f2937', // Dark gray background
+        scale: 2, // Higher resolution
+        useCORS: true,
+        logging: false
+      });
+      
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'mindmap.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 'image/png');
+    } catch (error) {
+      console.error('Failed to export mind map as image:', error);
+    }
   };
 
   const handleZoomIn = () => {
@@ -247,15 +295,11 @@ export default function MindMap({ entities, relationships, onNodeClick }: MindMa
 
   if (entities.length === 0) {
     return (
-      <Card className="cyber-card">
-        <CardContent className="flex items-center justify-center py-16">
-          <div className="text-center">
-            <div className="text-6xl mb-4">🕸</div>
-            <h3 className="text-lg font-semibold mb-2">No Entity Data Available</h3>
-            <p className="text-gray-400">Run AI analysis to generate the mind map</p>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="macos-card p-16 text-center">
+        <div className="text-6xl mb-4">🧠</div>
+        <h3 className="text-lg font-semibold text-white mb-2">No Entity Data Available</h3>
+        <p className="text-gray-400">Run AI analysis to generate the mind map visualization</p>
+      </div>
     );
   }
 
@@ -265,110 +309,119 @@ export default function MindMap({ entities, relationships, onNodeClick }: MindMa
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.5 }}
     >
-      <Card className="cyber-card">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center space-x-2">
-              <span className="text-neon-green">🧠</span>
-              <span>Entity Relationship Map</span>
-            </CardTitle>
-            
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleZoomIn}
-                className="neon-button info"
-              >
-                <ZoomIn className="h-4 w-4" />
-              </Button>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleZoomOut}
-                className="neon-button info"
-              >
-                <ZoomOut className="h-4 w-4" />
-              </Button>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleResetZoom}
-                className="neon-button"
-              >
-                <RotateCcw className="h-4 w-4" />
-              </Button>
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={exportMindMap}
-                className="neon-button"
-              >
-                <Download className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        
-        <CardContent>
-          <div className="relative">
-            <div 
-              ref={containerRef}
-              className="w-full bg-black/20 rounded-lg border border-neon-green/30 overflow-hidden"
-              style={{ height: '600px' }}
+      <div className="macos-card p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white flex items-center space-x-2">
+            <span>🧠</span>
+            <span>Entity Relationship Map</span>
+          </h3>
+          
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleZoomIn}
+              className="macos-button"
+              title="Zoom In"
             >
-              <svg
-                ref={svgRef}
-                width={dimensions.width}
-                height={dimensions.height}
-                className="w-full h-full"
-              />
-            </div>
+              <ZoomIn className="h-4 w-4" />
+            </button>
+            
+            <button
+              onClick={handleZoomOut}
+              className="macos-button"
+              title="Zoom Out"
+            >
+              <ZoomOut className="h-4 w-4" />
+            </button>
+            
+            <button
+              onClick={handleResetZoom}
+              className="macos-button"
+              title="Reset Zoom"
+            >
+              <RotateCcw className="h-4 w-4" />
+            </button>
+            
+            <button
+              onClick={exportMindMapAsImage}
+              className="macos-button macos-button-success"
+              title="Export as PNG Image"
+            >
+              <Image className="h-4 w-4" />
+              PNG
+            </button>
+            
+            <button
+              onClick={exportMindMapAsSVG}
+              className="macos-button"
+              title="Export as SVG"
+            >
+              <Download className="h-4 w-4" />
+              SVG
+            </button>
+          </div>
+        </div>
+        
+        <div className="relative">
+          <div 
+            ref={containerRef}
+            className="w-full bg-gray-900/50 rounded-lg border border-gray-600 overflow-hidden"
+            style={{ height: '600px' }}
+          >
+            <svg
+              ref={svgRef}
+              width={dimensions.width}
+              height={dimensions.height}
+              className="w-full h-full"
+            />
+          </div>
 
-            {selectedNode && (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="absolute top-4 right-4 bg-black/80 border border-neon-green p-4 rounded-lg"
-              >
-                <h4 className="font-semibold text-neon-green mb-2">Selected Entity</h4>
-                <div className="space-y-1 text-sm">
-                  <div><strong>Type:</strong> <Badge variant="outline" className="ml-1">{selectedNode.type}</Badge></div>
-                  <div><strong>Value:</strong> {selectedNode.value}</div>
-                  <div><strong>Confidence:</strong> {Math.round(selectedNode.confidence * 100)}%</div>
-                  <div><strong>Mentions:</strong> {selectedNode.mentions}</div>
-                </div>
-              </motion.div>
-            )}
-
-            {/* Legend */}
-            <div className="absolute bottom-4 left-4 bg-black/80 border border-neon-green/30 p-3 rounded-lg">
-              <h4 className="font-semibold text-neon-green mb-2 text-sm">Entity Types</h4>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                {Object.entries({
-                  person: '#00ff41',
-                  email: '#00d4ff',
-                  phone: '#ff0040',
-                  location: '#a855f7',
-                  username: '#ffff00',
-                  organization: '#ff8c00'
-                }).map(([type, color]) => (
-                  <div key={type} className="flex items-center space-x-2">
-                    <div 
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: color, filter: 'drop-shadow(0 0 3px currentColor)' }}
-                    />
-                    <span className="capitalize">{type}</span>
-                  </div>
-                ))}
+          {selectedNode && (
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="absolute top-4 right-4 bg-black/90 border border-blue-500 p-4 rounded-lg max-w-xs"
+            >
+              <h4 className="font-semibold text-blue-400 mb-2">Selected Entity</h4>
+              <div className="space-y-1 text-sm text-white">
+                <div><strong>Type:</strong> <span className="ml-1 px-2 py-1 bg-blue-600 text-xs rounded capitalize">{selectedNode.type}</span></div>
+                <div><strong>Value:</strong> {selectedNode.value}</div>
+                <div><strong>Confidence:</strong> {Math.round(selectedNode.confidence * 100)}%</div>
+                <div><strong>Mentions:</strong> {selectedNode.mentions}</div>
               </div>
+            </motion.div>
+          )}
+
+          {/* Legend */}
+          <div className="absolute bottom-4 left-4 bg-black/90 border border-gray-600 p-3 rounded-lg">
+            <h4 className="font-semibold text-white mb-2 text-sm">Entity Types</h4>
+            <div className="grid grid-cols-2 gap-2 text-xs text-white">
+              {Object.entries({
+                person: '#10b981',
+                email: '#06b6d4',
+                phone: '#ef4444',
+                location: '#8b5cf6',
+                username: '#84cc16',
+                organization: '#f97316',
+                website: '#f59e0b',
+                ip_address: '#6366f1'
+              }).map(([type, color]) => (
+                <div key={type} className="flex items-center space-x-2">
+                  <div 
+                    className="w-3 h-3 rounded-full"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="capitalize">{type.replace('_', ' ')}</span>
+                </div>
+              ))}
             </div>
           </div>
-        </CardContent>
-      </Card>
+          
+          {/* Instructions */}
+          <div className="absolute bottom-4 right-4 bg-black/70 p-2 rounded text-xs text-gray-300">
+            Click: Select • Drag: Move • Wheel: Zoom • Double-click: Center
+          </div>
+        </div>
+      </div>
     </motion.div>
   );
 }

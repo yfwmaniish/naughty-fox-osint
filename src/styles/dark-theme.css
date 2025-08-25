@@ -356,6 +356,26 @@
   background: var(--neon-blue);
 }
 
+.cyber-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.cyber-scrollbar::-webkit-scrollbar-track {
+  background: var(--bg-card);
+  border-radius: 3px;
+}
+
+.cyber-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(45deg, var(--neon-green), var(--neon-blue));
+  border-radius: 3px;
+  box-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+}
+
+.cyber-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--neon-green);
+  box-shadow: 0 0 15px rgba(0, 255, 65, 0.8);
+}
+
 /* Text Selection */
 ::selection {
   background: var(--neon-green);
@@ -457,5 +477,14 @@
   }
   50% {
     box-shadow: 0 0 20px rgba(0, 255, 65, 0.8);
+  }
+}
+
+@keyframes backgroundPulse {
+  0%, 100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.6;
   }
 }

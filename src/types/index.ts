@@ -2,7 +2,7 @@ export interface OSINTCase {
   id: string;
   name: string;
   subject: string;
-  description: string;
+  description: string; // Now used to store investigation notes instead of separate case description
   createdAt: Date;
   updatedAt: Date;
   status: 'draft' | 'analyzing' | 'completed';
@@ -21,6 +21,15 @@ export interface UploadedFile {
   uploadedAt: Date;
   tags: string[];
   annotations: string[];
+  metadata?: {
+    dimensions?: {
+      width: number;
+      height: number;
+    };
+    duration?: number;
+    lastModified?: Date;
+    [key: string]: any;
+  };
 }
 
 export interface AIAnalysis {
